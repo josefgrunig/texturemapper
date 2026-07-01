@@ -1,0 +1,13 @@
+{
+  "name": "com.wayexperience.texturemapper",
+  "version": "1.0.0",
+  "displayName": "WayExperience Texture Mapper",
+  "description": "Editor tool for remapping texture channels into URP/Lit-ready BaseMap, MAHS and Normal maps, driven by filename suffixes.",
+  "unity": "6000.0",
+  "type": "tool",
+  "author": {
+    "name": "Josef Grunig",
+    "email": "josef.grunig@gmail.com"
+  },
+  "keywords": ["texture", "remapping", "urp", "editor", "tool"]
+}
