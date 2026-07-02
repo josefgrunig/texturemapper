@@ -4,6 +4,11 @@ All notable changes to this package will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-07-02
+
+### Fixed
+- Added Unity-generated `.meta` files to the package so it installs without "no meta file" warnings in immutable folders
+
 ## [1.0.0] - 2026-07-01
 
 ### Added

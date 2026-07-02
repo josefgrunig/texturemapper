@@ -22,7 +22,7 @@ the source textures automatically, bakes them into `_BaseMap`, `_MAHS` and
 2. Click **+** → **Add package from git URL…**
 3. Paste:
    ```
-   https://github.com/josefgrunig/texturemapper.git#v1.0.0
+   https://github.com/josefgrunig/texturemapper.git#v1.0.1
    ```
 4. Click **Add**
 
@@ -35,7 +35,7 @@ Open `Packages/manifest.json` in your project and add the entry inside `"depende
 ```json
 {
   "dependencies": {
-    "com.wayexperience.texturemapper": "https://github.com/josefgrunig/texturemapper.git#v1.0.0"
+    "com.wayexperience.texturemapper": "https://github.com/josefgrunig/texturemapper.git#v1.0.1"
   }
 }
 ```
