@@ -22,16 +22,31 @@ the source textures automatically, bakes them into `_BaseMap`, `_MAHS` and
 2. Click **+** → **Add package from git URL…**
 3. Paste:
    ```
-   https://github.com/josefgrunig/texturemapper.git#v1.0.1
+   https://github.com/josefgrunig/texturemapper.git#main
    ```
 4. Click **Add**
 
-To update to a newer release, replace `v1.0.0` with the desired tag.
+This always tracks the latest stable release. To update, click **Update** in Package Manager whenever a new version is available.
+
+To pin to a specific release instead, use a version tag:
+   ```
+   https://github.com/josefgrunig/texturemapper.git#v1.0.1
+   ```
 
 ### Option B — Edit `manifest.json` directly
 
 Open `Packages/manifest.json` in your project and add the entry inside `"dependencies"`:
 
+**Latest stable (recommended):**
+```json
+{
+  "dependencies": {
+    "com.wayexperience.texturemapper": "https://github.com/josefgrunig/texturemapper.git#main"
+  }
+}
+```
+
+**Pinned to a specific version:**
 ```json
 {
   "dependencies": {
