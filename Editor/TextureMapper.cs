@@ -20,7 +20,9 @@ namespace WayExperience.Editor
 
     public enum OutputTexture { BaseMap, MAHS, Normal }
 
-    // ── Config ScriptableObject ───────────────────────────────────────────────
+    // ── Config ───────────────────────────────────────────────────────────────
+    // Plain serializable class saved as JSON — avoids Unity script-GUID issues
+    // when the code lives in a package rather than the project's Assets folder.
 
     [Serializable]
     public class ChannelMapping
@@ -32,16 +34,16 @@ namespace WayExperience.Editor
     [Serializable]
     public class SuffixConfig
     {
-        public string         suffix        = "_Suffix";
-        public OutputTexture  outputTexture = OutputTexture.BaseMap;
-        public bool           isNormalMap   = false;
+        public string               suffix        = "_Suffix";
+        public OutputTexture        outputTexture = OutputTexture.BaseMap;
+        public bool                 isNormalMap   = false;
         public List<ChannelMapping> channelMappings = new List<ChannelMapping>();
 
         [NonSerialized] public bool foldout;
     }
 
-    [CreateAssetMenu(menuName = "WayExperience/Texture Mapper Config", fileName = "TextureMapperConfig")]
-    public class TextureMapperConfig : ScriptableObject
+    [Serializable]
+    public class TextureMapperConfig
     {
         public List<SuffixConfig> suffixConfigs        = new List<SuffixConfig>();
         public string             outputPrefix         = "REMAPPED_";
@@ -53,7 +55,8 @@ namespace WayExperience.Editor
 
     public class TextureMapperWindow : EditorWindow
     {
-        const string k_ConfigPath = "Assets/Editor/WayExperience/TextureMapperConfig.asset";
+        // JSON file in the project (not the package) — immune to script-GUID changes
+        const string k_ConfigAssetPath = "Assets/Editor/WayExperience/TextureMapperConfig.json";
 
         TextureMapperConfig _config;
         Vector2             _scroll;
@@ -69,19 +72,37 @@ namespace WayExperience.Editor
 
         // ── Config ────────────────────────────────────────────────────────────
 
+        string ConfigAbsPath()
+        {
+            string root = Application.dataPath.Substring(0, Application.dataPath.Length - "Assets".Length);
+            return Path.Combine(root, k_ConfigAssetPath).Replace('\\', '/');
+        }
+
         void LoadOrCreateConfig()
         {
-            _config = AssetDatabase.LoadAssetAtPath<TextureMapperConfig>(k_ConfigPath);
-            if (_config != null) return;
+            string absPath = ConfigAbsPath();
+            if (File.Exists(absPath))
+            {
+                try
+                {
+                    _config = JsonUtility.FromJson<TextureMapperConfig>(File.ReadAllText(absPath));
+                    if (_config != null) return;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[TextureMapper] Could not parse config — resetting to defaults. ({e.Message})");
+                }
+            }
 
-            string dir = Path.GetDirectoryName(k_ConfigPath);
-            if (!AssetDatabase.IsValidFolder(dir))
-                Directory.CreateDirectory(dir);
+            _config = new TextureMapperConfig { suffixConfigs = BuildDefaultConfigs() };
+            SaveConfig();
+        }
 
-            _config = CreateInstance<TextureMapperConfig>();
-            _config.suffixConfigs = BuildDefaultConfigs();
-            AssetDatabase.CreateAsset(_config, k_ConfigPath);
-            AssetDatabase.SaveAssets();
+        void SaveConfig()
+        {
+            string absPath = ConfigAbsPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(absPath));
+            File.WriteAllText(absPath, JsonUtility.ToJson(_config, prettyPrint: true));
         }
 
         static List<SuffixConfig> BuildDefaultConfigs() => new List<SuffixConfig>
@@ -159,7 +180,7 @@ namespace WayExperience.Editor
                 _config.autoAssignTextures);
 
             if (EditorGUI.EndChangeCheck())
-                EditorUtility.SetDirty(_config);
+                SaveConfig();
 
             EditorGUILayout.Space(8);
             EditorGUILayout.LabelField("Suffix → Channel Mappings", EditorStyles.boldLabel);
@@ -174,18 +195,18 @@ namespace WayExperience.Editor
             if (GUILayout.Button("+ Add Suffix"))
             {
                 _config.suffixConfigs.Add(new SuffixConfig());
-                EditorUtility.SetDirty(_config);
+                SaveConfig();
             }
             if (GUILayout.Button("Reset Defaults"))
             {
                 if (EditorUtility.DisplayDialog("Reset", "Reset all suffix configs to defaults?", "Reset", "Cancel"))
                 {
                     _config.suffixConfigs = BuildDefaultConfigs();
-                    EditorUtility.SetDirty(_config);
+                    SaveConfig();
                 }
             }
             if (GUILayout.Button("Save Config"))
-                AssetDatabase.SaveAssets();
+                SaveConfig();
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space(8);
@@ -249,16 +270,23 @@ namespace WayExperience.Editor
                         EditorGUILayout.EndHorizontal();
                     }
 
-                    if (toRemoveCh >= 0) cfg.channelMappings.RemoveAt(toRemoveCh);
+                    if (toRemoveCh >= 0)
+                    {
+                        cfg.channelMappings.RemoveAt(toRemoveCh);
+                        SaveConfig();
+                    }
 
                     EditorGUILayout.BeginHorizontal();
                     GUILayout.Space(EditorGUI.indentLevel * 15f + 4f);
                     if (GUILayout.Button("+ Add Channel Mapping", GUILayout.Height(20)))
+                    {
                         cfg.channelMappings.Add(new ChannelMapping());
+                        SaveConfig();
+                    }
                     EditorGUILayout.EndHorizontal();
 
                     if (EditorGUI.EndChangeCheck())
-                        EditorUtility.SetDirty(_config);
+                        SaveConfig();
 
                     EditorGUI.indentLevel--;
                 }
@@ -270,7 +298,7 @@ namespace WayExperience.Editor
             if (toRemove >= 0)
             {
                 _config.suffixConfigs.RemoveAt(toRemove);
-                EditorUtility.SetDirty(_config);
+                SaveConfig();
             }
         }
 
