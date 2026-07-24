@@ -30,7 +30,7 @@ This always tracks the latest stable release. To update, click **Update** in Pac
 
 To pin to a specific release instead, use a version tag:
    ```
-   https://github.com/josefgrunig/texturemapper.git#v1.0.1
+   https://github.com/josefgrunig/texturemapper.git#v1.1.0
    ```
 
 ### Option B — Edit `manifest.json` directly
@@ -50,7 +50,7 @@ Open `Packages/manifest.json` in your project and add the entry inside `"depende
 ```json
 {
   "dependencies": {
-    "com.wayexperience.texturemapper": "https://github.com/josefgrunig/texturemapper.git#v1.0.1"
+    "com.wayexperience.texturemapper": "https://github.com/josefgrunig/texturemapper.git#v1.1.0"
   }
 }
 ```

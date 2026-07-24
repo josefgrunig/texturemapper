@@ -1,6 +1,6 @@
 {
   "name": "com.wayexperience.texturemapper",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "displayName": "WayExperience Texture Mapper",
   "description": "Editor tool for remapping texture channels into URP/Lit-ready BaseMap, MAHS and Normal maps, driven by filename suffixes.",
   "unity": "6000.0",

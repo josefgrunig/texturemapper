@@ -4,6 +4,11 @@ All notable changes to this package will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-07-24
+
+### Fixed
+- Config no longer resets to defaults on project reopen. Root cause: the ScriptableObject asset stored a Unity script GUID that became invalid once the code moved into a package, causing silent deserialization failure. Replaced with a plain JSON file (`TextureMapperConfig.json`) that has no script reference dependency.
+
 ## [1.0.1] - 2026-07-02
 
 ### Fixed
