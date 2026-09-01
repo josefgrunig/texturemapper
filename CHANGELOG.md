@@ -4,6 +4,26 @@ All notable changes to this package will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-01
+
+### Added
+- **Auto-Assign to Materials** is now a full configurable section replacing the simple toggle:
+  - Enable/disable toggle
+  - Shader picker (ObjectField) — selecting a known preset shader auto-populates the slot mappings
+  - **Preset ▾** dropdown to apply a built-in mapping template without needing the shader imported in the project. Supports `Universal Render Pipeline/Lit` and `Shader Graphs/DefaultMasterShader`
+  - Editable list of Output Texture → Shader Property slot mappings with add/remove controls
+  - Remap now sets `mat.shader` to the configured shader before assigning texture slots
+- **Save Config** and **Reset Defaults** buttons pinned to the bottom of the window
+- **+ Add Suffix** moved to the bottom of the Suffix section; **+ Add Shader Mapping** at the bottom of the Shader Assign section
+
+### Fixed
+- ShaderGraph shaders now correctly resolve via their full registered name (e.g. `Shader Graphs/DefaultMasterShader`) instead of the asset filename
+
+## [1.1.1] - 2026-09-01
+
+### Added
+- Preset ▾ dropdown for shader slot mappings (intermediate build — superseded by 1.2.0)
+
 ## [1.1.0] - 2026-07-24
 
 ### Fixed
@@ -23,8 +43,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Roughness → Smoothness inversion (`1 - value`) built in
 - Configurable output prefix (default `REMAPPED_`) to distinguish generated textures
 - Per-suffix channel mapping editor with add/remove controls
-- Save/Reset config persisted as ScriptableObject in the project
+- Config persisted as JSON file in the project (`Assets/Editor/WayExperience/TextureMapperConfig.json`)
 - Flag to delete source textures after baking (default: on)
-- Flag to auto-assign generated textures to URP/Lit material slots (default: on)
+- Auto-assign generated textures to material shader slots (default: on)
 - Bilinear resize when source textures have mismatched resolutions
 - Operates on selected materials in the Project window
