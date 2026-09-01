@@ -21,7 +21,7 @@ namespace WayExperience.Editor
     public enum OutputTexture { BaseMap, MAHS, Normal }
 
     // ── Config ───────────────────────────────────────────────────────────────
-    // Plain serializable class saved as JSON — avoids Unity script-GUID issues
+    // Plain serializable classes saved as JSON — avoids Unity script-GUID issues
     // when the code lives in a package rather than the project's Assets folder.
 
     [Serializable]
@@ -34,12 +34,27 @@ namespace WayExperience.Editor
     [Serializable]
     public class SuffixConfig
     {
-        public string               suffix        = "_Suffix";
-        public OutputTexture        outputTexture = OutputTexture.BaseMap;
-        public bool                 isNormalMap   = false;
+        public string               suffix          = "_Suffix";
+        public OutputTexture        outputTexture   = OutputTexture.BaseMap;
+        public bool                 isNormalMap     = false;
         public List<ChannelMapping> channelMappings = new List<ChannelMapping>();
 
         [NonSerialized] public bool foldout;
+    }
+
+    [Serializable]
+    public class ShaderTextureMapping
+    {
+        public OutputTexture outputTexture  = OutputTexture.BaseMap;
+        public string        shaderProperty = "_BaseMap";
+    }
+
+    [Serializable]
+    public class ShaderAssignConfig
+    {
+        public bool   enabled    = true;
+        public string shaderName = "Universal Render Pipeline/Lit";
+        public List<ShaderTextureMapping> textureMappings = new List<ShaderTextureMapping>();
     }
 
     [Serializable]
@@ -48,7 +63,7 @@ namespace WayExperience.Editor
         public List<SuffixConfig> suffixConfigs        = new List<SuffixConfig>();
         public string             outputPrefix         = "REMAPPED_";
         public bool               deleteSourceTextures = true;
-        public bool               autoAssignTextures   = true;
+        public ShaderAssignConfig shaderAssign         = new ShaderAssignConfig();
     }
 
     // ── Editor Window ─────────────────────────────────────────────────────────
@@ -58,17 +73,41 @@ namespace WayExperience.Editor
         // JSON file in the project (not the package) — immune to script-GUID changes
         const string k_ConfigAssetPath = "Assets/Editor/WayExperience/TextureMapperConfig.json";
 
+        // Known shader presets: shader name → default slot mappings
+        static readonly Dictionary<string, List<ShaderTextureMapping>> k_ShaderPresets =
+            new Dictionary<string, List<ShaderTextureMapping>>
+        {
+            ["Universal Render Pipeline/Lit"] = new List<ShaderTextureMapping>
+            {
+                new ShaderTextureMapping { outputTexture = OutputTexture.BaseMap, shaderProperty = "_BaseMap" },
+                new ShaderTextureMapping { outputTexture = OutputTexture.MAHS,    shaderProperty = "_MetallicGlossMap" },
+                new ShaderTextureMapping { outputTexture = OutputTexture.MAHS,    shaderProperty = "_OcclusionMap" },
+                new ShaderTextureMapping { outputTexture = OutputTexture.Normal,  shaderProperty = "_BumpMap" },
+            },
+            ["Shader Graphs/DefaultMasterShader"] = new List<ShaderTextureMapping>
+            {
+                new ShaderTextureMapping { outputTexture = OutputTexture.BaseMap, shaderProperty = "_BaseMap" },
+                new ShaderTextureMapping { outputTexture = OutputTexture.MAHS,    shaderProperty = "_MAHS" },
+                new ShaderTextureMapping { outputTexture = OutputTexture.Normal,  shaderProperty = "_BumpMap" },
+            },
+        };
+
         TextureMapperConfig _config;
         Vector2             _scroll;
+        Shader              _shaderObj;   // transient — not serialized, resolved from shaderName
 
         [MenuItem("Window/WayExperience/TextureMapper")]
         public static void Open()
         {
             var win = GetWindow<TextureMapperWindow>("Texture Mapper");
-            win.minSize = new Vector2(440, 520);
+            win.minSize = new Vector2(460, 560);
         }
 
-        void OnEnable() => LoadOrCreateConfig();
+        void OnEnable()
+        {
+            LoadOrCreateConfig();
+            SyncShaderObj();
+        }
 
         // ── Config ────────────────────────────────────────────────────────────
 
@@ -86,7 +125,13 @@ namespace WayExperience.Editor
                 try
                 {
                     _config = JsonUtility.FromJson<TextureMapperConfig>(File.ReadAllText(absPath));
-                    if (_config != null) return;
+                    if (_config != null)
+                    {
+                        // Ensure nested objects are never null after deserialization
+                        if (_config.shaderAssign == null)
+                            _config.shaderAssign = BuildDefaultShaderAssign();
+                        return;
+                    }
                 }
                 catch (Exception e)
                 {
@@ -94,7 +139,11 @@ namespace WayExperience.Editor
                 }
             }
 
-            _config = new TextureMapperConfig { suffixConfigs = BuildDefaultConfigs() };
+            _config = new TextureMapperConfig
+            {
+                suffixConfigs = BuildDefaultSuffixConfigs(),
+                shaderAssign  = BuildDefaultShaderAssign(),
+            };
             SaveConfig();
         }
 
@@ -105,46 +154,68 @@ namespace WayExperience.Editor
             File.WriteAllText(absPath, JsonUtility.ToJson(_config, prettyPrint: true));
         }
 
-        static List<SuffixConfig> BuildDefaultConfigs() => new List<SuffixConfig>
+        // Resolve shader name → Shader object (for the ObjectField)
+        void SyncShaderObj()
         {
-            // Albedo / Diffuse → BaseMap RGB
-            Cfg("_Diffuse", OutputTexture.BaseMap, false,
+            string name = _config?.shaderAssign?.shaderName ?? "";
+            _shaderObj = string.IsNullOrEmpty(name) ? null : Shader.Find(name);
+        }
+
+        // ── Default builders ──────────────────────────────────────────────────
+
+        static List<SuffixConfig> BuildDefaultSuffixConfigs() => new List<SuffixConfig>
+        {
+            Sfx("_Diffuse", OutputTexture.BaseMap, false,
                 (ChannelSource.R, ChannelTarget.R),
                 (ChannelSource.G, ChannelTarget.G),
                 (ChannelSource.B, ChannelTarget.B)),
 
-            Cfg("_Albedo", OutputTexture.BaseMap, false,
+            Sfx("_Albedo", OutputTexture.BaseMap, false,
                 (ChannelSource.R, ChannelTarget.R),
                 (ChannelSource.G, ChannelTarget.G),
                 (ChannelSource.B, ChannelTarget.B)),
 
-            // Opacity → BaseMap Alpha
-            Cfg("_Opacity", OutputTexture.BaseMap, false,
+            Sfx("_Opacity", OutputTexture.BaseMap, false,
                 (ChannelSource.R, ChannelTarget.A)),
 
-            // Metallic → MAHS R
-            Cfg("_Metallic", OutputTexture.MAHS, false,
+            Sfx("_Metallic", OutputTexture.MAHS, false,
                 (ChannelSource.R, ChannelTarget.R)),
 
-            // Roughness inverted → MAHS Alpha (Smoothness = 1 - Roughness)
-            Cfg("_Roughness", OutputTexture.MAHS, false,
+            Sfx("_Roughness", OutputTexture.MAHS, false,
                 (ChannelSource.OneMinusR, ChannelTarget.A)),
 
-            // Ambient Occlusion → MAHS Green
-            Cfg("_AmbientOcclusion", OutputTexture.MAHS, false,
+            Sfx("_AmbientOcclusion", OutputTexture.MAHS, false,
                 (ChannelSource.R, ChannelTarget.G)),
 
-            Cfg("_Occlusion", OutputTexture.MAHS, false,
+            Sfx("_Occlusion", OutputTexture.MAHS, false,
                 (ChannelSource.R, ChannelTarget.G)),
 
-            // Normal → Normal RGB (mark as normal map)
-            Cfg("_Normal", OutputTexture.Normal, true,
+            Sfx("_Normal", OutputTexture.Normal, true,
                 (ChannelSource.R, ChannelTarget.R),
                 (ChannelSource.G, ChannelTarget.G),
                 (ChannelSource.B, ChannelTarget.B)),
         };
 
-        static SuffixConfig Cfg(string suffix, OutputTexture output, bool isNormal,
+        static ShaderAssignConfig BuildDefaultShaderAssign()
+        {
+            const string defaultShader = "Universal Render Pipeline/Lit";
+            return new ShaderAssignConfig
+            {
+                enabled        = true,
+                shaderName     = defaultShader,
+                textureMappings = ClonePreset(defaultShader),
+            };
+        }
+
+        static List<ShaderTextureMapping> ClonePreset(string shaderName)
+        {
+            if (!k_ShaderPresets.TryGetValue(shaderName, out var src))
+                return new List<ShaderTextureMapping>();
+            return src.Select(m => new ShaderTextureMapping
+                { outputTexture = m.outputTexture, shaderProperty = m.shaderProperty }).ToList();
+        }
+
+        static SuffixConfig Sfx(string suffix, OutputTexture output, bool isNormal,
             params (ChannelSource src, ChannelTarget dst)[] mappings)
         {
             var c = new SuffixConfig { suffix = suffix, outputTexture = output, isNormalMap = isNormal };
@@ -157,60 +228,39 @@ namespace WayExperience.Editor
 
         void OnGUI()
         {
-            if (_config == null) { LoadOrCreateConfig(); return; }
+            if (_config == null) { LoadOrCreateConfig(); SyncShaderObj(); return; }
 
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Texture Channel Mapper", EditorStyles.boldLabel);
             EditorGUILayout.Space(4);
 
+            // Top-level settings (outside scroll)
             EditorGUI.BeginChangeCheck();
             _config.outputPrefix = EditorGUILayout.TextField(
                 new GUIContent("Output Texture Prefix",
                     "Prepended to every generated texture name (e.g. REMAPPED_Slim_Jeans_BaseMap.png)"),
                 _config.outputPrefix);
-
             _config.deleteSourceTextures = EditorGUILayout.Toggle(
                 new GUIContent("Delete Source Textures",
                     "Remove original source textures once they have been baked into the output maps"),
                 _config.deleteSourceTextures);
-
-            _config.autoAssignTextures = EditorGUILayout.Toggle(
-                new GUIContent("Auto-Assign to Materials",
-                    "Automatically assign generated _BaseMap / _MAHS / _Normal textures to the URP/Lit material slots"),
-                _config.autoAssignTextures);
-
             if (EditorGUI.EndChangeCheck())
                 SaveConfig();
 
-            EditorGUILayout.Space(8);
-            EditorGUILayout.LabelField("Suffix → Channel Mappings", EditorStyles.boldLabel);
-            EditorGUILayout.Space(2);
+            EditorGUILayout.Space(6);
 
+            // Scrollable content: both sections
             _scroll = EditorGUILayout.BeginScrollView(_scroll, GUILayout.ExpandHeight(true));
-            DrawSuffixList();
+
+            DrawSuffixSection();
+            EditorGUILayout.Space(10);
+            DrawShaderAssignSection();
+
             EditorGUILayout.EndScrollView();
 
-            EditorGUILayout.Space(4);
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("+ Add Suffix"))
-            {
-                _config.suffixConfigs.Add(new SuffixConfig());
-                SaveConfig();
-            }
-            if (GUILayout.Button("Reset Defaults"))
-            {
-                if (EditorUtility.DisplayDialog("Reset", "Reset all suffix configs to defaults?", "Reset", "Cancel"))
-                {
-                    _config.suffixConfigs = BuildDefaultConfigs();
-                    SaveConfig();
-                }
-            }
-            if (GUILayout.Button("Save Config"))
-                SaveConfig();
-            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.Space(6);
 
-            EditorGUILayout.Space(8);
-
+            // Remap button
             var selMats = Selection.objects.OfType<Material>().ToList();
             string hint = selMats.Count == 0
                 ? "Select materials in the Project window to remap."
@@ -224,12 +274,36 @@ namespace WayExperience.Editor
                 RemapSelectedMaterials(selMats);
             GUI.backgroundColor = prevBg;
             GUI.enabled = true;
+
+            EditorGUILayout.Space(4);
+
+            // Save / Reset — pinned to bottom
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Reset Defaults"))
+            {
+                if (EditorUtility.DisplayDialog("Reset", "Reset all settings to defaults?", "Reset", "Cancel"))
+                {
+                    _config.suffixConfigs = BuildDefaultSuffixConfigs();
+                    _config.shaderAssign  = BuildDefaultShaderAssign();
+                    SaveConfig();
+                    SyncShaderObj();
+                }
+            }
+            if (GUILayout.Button("Save Config"))
+                SaveConfig();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(2);
         }
 
-        void DrawSuffixList()
-        {
-            int toRemove = -1;
+        // ── Suffix section ────────────────────────────────────────────────────
 
+        void DrawSuffixSection()
+        {
+            EditorGUILayout.LabelField("Suffix → Channel Mappings", EditorStyles.boldLabel);
+            EditorGUILayout.Space(2);
+
+            int toRemove = -1;
             for (int i = 0; i < _config.suffixConfigs.Count; i++)
             {
                 var cfg = _config.suffixConfigs[i];
@@ -300,6 +374,112 @@ namespace WayExperience.Editor
                 _config.suffixConfigs.RemoveAt(toRemove);
                 SaveConfig();
             }
+
+            EditorGUILayout.Space(2);
+            if (GUILayout.Button("+ Add Suffix"))
+            {
+                _config.suffixConfigs.Add(new SuffixConfig());
+                SaveConfig();
+            }
+        }
+
+        // ── Shader assign section ─────────────────────────────────────────────
+
+        void DrawShaderAssignSection()
+        {
+            var sa = _config.shaderAssign;
+
+            EditorGUILayout.LabelField("Auto-Assign to Materials", EditorStyles.boldLabel);
+            EditorGUILayout.Space(2);
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+            EditorGUI.BeginChangeCheck();
+            sa.enabled = EditorGUILayout.Toggle(
+                new GUIContent("Enabled", "Assign generated textures to material shader slots after remapping"),
+                sa.enabled);
+            if (EditorGUI.EndChangeCheck())
+                SaveConfig();
+
+            GUI.enabled = sa.enabled;
+
+            // Shader row: ObjectField + Preset dropdown
+            EditorGUILayout.BeginHorizontal();
+            EditorGUI.BeginChangeCheck();
+            var newShader = (Shader)EditorGUILayout.ObjectField(
+                new GUIContent("Shader", "Target shader. Use the Preset button to apply a known mapping template."),
+                _shaderObj, typeof(Shader), false);
+            if (EditorGUI.EndChangeCheck() && newShader != _shaderObj)
+            {
+                _shaderObj    = newShader;
+                sa.shaderName = newShader != null ? newShader.name : "";
+                if (newShader != null && k_ShaderPresets.ContainsKey(newShader.name))
+                {
+                    sa.textureMappings = ClonePreset(newShader.name);
+                    Debug.Log($"[TextureMapper] Shader preset applied: {newShader.name}");
+                }
+                SaveConfig();
+            }
+
+            // Preset dropdown — works even when the shader is not imported in this project
+            if (GUILayout.Button("Preset ▾", GUILayout.Width(70)))
+            {
+                var menu = new GenericMenu();
+                foreach (var presetName in k_ShaderPresets.Keys)
+                {
+                    string captured = presetName;
+                    menu.AddItem(new GUIContent(captured), sa.shaderName == captured, () =>
+                    {
+                        sa.shaderName      = captured;
+                        sa.textureMappings = ClonePreset(captured);
+                        _shaderObj         = Shader.Find(captured); // may be null if not in project
+                        SaveConfig();
+                        Debug.Log($"[TextureMapper] Shader preset applied: {captured}");
+                        Repaint();
+                    });
+                }
+                menu.ShowAsContext();
+            }
+            EditorGUILayout.EndHorizontal();
+
+            // Show shader name as read-only text when ObjectField is null (shader not in project)
+            if (_shaderObj == null && !string.IsNullOrEmpty(sa.shaderName))
+                EditorGUILayout.HelpBox($"Shader \"{sa.shaderName}\" not found in project — mappings still apply at runtime.", MessageType.Info);
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Texture → Shader Property", EditorStyles.miniBoldLabel);
+
+            int toRemove = -1;
+            for (int i = 0; i < sa.textureMappings.Count; i++)
+            {
+                var m = sa.textureMappings[i];
+                EditorGUILayout.BeginHorizontal();
+                EditorGUI.BeginChangeCheck();
+                m.outputTexture  = (OutputTexture)EditorGUILayout.EnumPopup(m.outputTexture, GUILayout.Width(90));
+                EditorGUILayout.LabelField("→", GUILayout.Width(16));
+                m.shaderProperty = EditorGUILayout.TextField(m.shaderProperty);
+                if (EditorGUI.EndChangeCheck())
+                    SaveConfig();
+                if (GUILayout.Button("−", GUILayout.Width(22)))
+                    toRemove = i;
+                EditorGUILayout.EndHorizontal();
+            }
+
+            if (toRemove >= 0)
+            {
+                sa.textureMappings.RemoveAt(toRemove);
+                SaveConfig();
+            }
+
+            EditorGUILayout.Space(2);
+            if (GUILayout.Button("+ Add Shader Mapping"))
+            {
+                sa.textureMappings.Add(new ShaderTextureMapping());
+                SaveConfig();
+            }
+
+            GUI.enabled = true;
+            EditorGUILayout.EndVertical();
         }
 
         // ── Remap ─────────────────────────────────────────────────────────────
@@ -308,7 +488,7 @@ namespace WayExperience.Editor
         {
             Debug.Log($"[TextureMapper] ══ Starting remap for {materials.Count} material(s) ══");
 
-            var toDelete = new List<string>(); // paths to remove after all materials processed
+            var toDelete = new List<string>();
 
             foreach (var mat in materials)
                 ProcessMaterial(mat, toDelete);
@@ -322,7 +502,7 @@ namespace WayExperience.Editor
 
             AssetDatabase.Refresh();
 
-            if (_config.autoAssignTextures)
+            if (_config.shaderAssign.enabled && _config.shaderAssign.textureMappings.Count > 0)
             {
                 foreach (var mat in materials)
                     AutoAssignTextures(mat);
@@ -352,7 +532,6 @@ namespace WayExperience.Editor
             string prefix = mat.name;
             Debug.Log($"[TextureMapper] [{mat.name}] Texture folder: {texFolder}");
 
-            // Find all textures whose filename starts with the material prefix
             var matched = new List<(SuffixConfig cfg, string path)>();
             foreach (var guid in AssetDatabase.FindAssets("t:Texture2D", new[] { texFolder }))
             {
@@ -377,7 +556,6 @@ namespace WayExperience.Editor
                 return;
             }
 
-            // Determine output resolution (largest source wins)
             int outW = 4, outH = 4;
             foreach (var (_, path) in matched)
             {
@@ -388,10 +566,6 @@ namespace WayExperience.Editor
                 if (h > outH) outH = h;
             }
 
-            // Output pixel buffers with sensible defaults:
-            //   BaseMap  → opaque black  (A=1)
-            //   MAHS     → R=0 G=1 A=1  (no metal, full AO, full smooth)
-            //   Normal   → flat (0.5, 0.5, 1.0)
             var buffers = new Dictionary<OutputTexture, Color[]>
             {
                 [OutputTexture.BaseMap] = Fill(outW * outH, new Color(0f,   0f,   0f,   1f)),
@@ -400,7 +574,6 @@ namespace WayExperience.Editor
             };
             var written = new HashSet<OutputTexture>();
 
-            // Apply each matched source to its output buffer
             foreach (var (cfg, srcPath) in matched)
             {
                 Color[] srcPx = ReadPixels(srcPath, cfg.isNormalMap, outW, outH);
@@ -422,7 +595,6 @@ namespace WayExperience.Editor
                           $"({string.Join(", ", activeMappings.Select(c => $"{c.source}→{c.target}"))})");
             }
 
-            // Save output PNGs and collect their base names so we don't delete them
             var outputBaseNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var outType in written)
             {
@@ -439,7 +611,6 @@ namespace WayExperience.Editor
                     outputBaseNames.Add(Path.GetFileNameWithoutExtension(saved));
             }
 
-            // Queue sources for deletion (skip any whose base name matches an output we just wrote)
             if (_config.deleteSourceTextures)
                 foreach (var (_, srcPath) in matched)
                 {
@@ -460,23 +631,21 @@ namespace WayExperience.Editor
                 return null;
             }
 
-            // We need Read/Write access and raw (unswizzled) data
-            bool wasReadable = imp.isReadable;
-            var  wasType     = imp.textureType;
+            bool wasReadable  = imp.isReadable;
+            var  wasType      = imp.textureType;
             bool needReimport = !wasReadable || wasType == TextureImporterType.NormalMap;
 
             if (needReimport)
             {
                 imp.isReadable  = true;
                 if (wasType == TextureImporterType.NormalMap)
-                    imp.textureType = TextureImporterType.Default; // access raw RGB, not reconstructed XYZ
+                    imp.textureType = TextureImporterType.Default;
                 imp.SaveAndReimport();
             }
 
             var tex    = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
             var pixels = tex != null ? tex.GetPixels() : null;
 
-            // Restore original import settings
             if (needReimport)
             {
                 imp.isReadable  = wasReadable;
@@ -490,7 +659,6 @@ namespace WayExperience.Editor
                 return null;
             }
 
-            // Resize to output resolution if needed
             if (tex.width != targetW || tex.height != targetH)
                 pixels = BilinearResize(pixels, tex.width, tex.height, targetW, targetH);
 
@@ -505,9 +673,9 @@ namespace WayExperience.Editor
             byte[] png = tex.EncodeToPNG();
             DestroyImmediate(tex);
 
-            string assetPath = $"{folder}/{name}.png";
+            string assetPath  = $"{folder}/{name}.png";
             string projectRoot = Application.dataPath.Substring(0, Application.dataPath.Length - "Assets".Length);
-            string absPath = Path.Combine(projectRoot, assetPath);
+            string absPath    = Path.Combine(projectRoot, assetPath);
 
             Directory.CreateDirectory(Path.GetDirectoryName(absPath));
             File.WriteAllBytes(absPath, png);
@@ -519,7 +687,7 @@ namespace WayExperience.Editor
                 imp.textureType = isNormal ? TextureImporterType.NormalMap : TextureImporterType.Default;
                 imp.sRGBTexture = isSRGB;
                 imp.isReadable  = false;
-                if (!isNormal && !isSRGB) // MAHS is linear
+                if (!isNormal && !isSRGB)
                     imp.sRGBTexture = false;
                 imp.SaveAndReimport();
             }
@@ -596,26 +764,42 @@ namespace WayExperience.Editor
                 return;
             }
 
-            string p = _config.outputPrefix + mat.name;
+            // Assign shader first so property names are valid before setting textures
+            if (!string.IsNullOrEmpty(_config.shaderAssign.shaderName))
+            {
+                var shader = Shader.Find(_config.shaderAssign.shaderName);
+                if (shader != null)
+                {
+                    mat.shader = shader;
+                    Debug.Log($"[TextureMapper] [{mat.name}] Shader ← {_config.shaderAssign.shaderName}");
+                }
+                else
+                {
+                    Debug.LogWarning($"[TextureMapper] [{mat.name}] Shader \"{_config.shaderAssign.shaderName}\" not found — shader not changed.");
+                }
+            }
 
-            AssignSlot(mat, "_BaseMap",          folder, p + "_BaseMap");
-            AssignSlot(mat, "_MetallicGlossMap", folder, p + "_MAHS");
-            AssignSlot(mat, "_OcclusionMap",     folder, p + "_MAHS");
-            AssignSlot(mat, "_BumpMap",          folder, p + "_Normal");
+            string prefix = _config.outputPrefix + mat.name;
+
+            foreach (var m in _config.shaderAssign.textureMappings)
+            {
+                if (string.IsNullOrEmpty(m.shaderProperty)) continue;
+
+                string texSuffix = m.outputTexture == OutputTexture.BaseMap ? "_BaseMap"
+                                 : m.outputTexture == OutputTexture.MAHS    ? "_MAHS"
+                                 :                                             "_Normal";
+
+                string path = FindTexturePath(folder, prefix + texSuffix);
+                if (path == null) continue;
+
+                var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+                if (tex == null) continue;
+
+                mat.SetTexture(m.shaderProperty, tex);
+                Debug.Log($"[TextureMapper] [{mat.name}] {m.shaderProperty} ← {path}");
+            }
 
             EditorUtility.SetDirty(mat);
-        }
-
-        void AssignSlot(Material mat, string shaderProp, string folder, string nameNoExt)
-        {
-            string path = FindTexturePath(folder, nameNoExt);
-            if (path == null) return;
-
-            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
-            if (tex == null) return;
-
-            mat.SetTexture(shaderProp, tex);
-            Debug.Log($"[TextureMapper] [{mat.name}] {shaderProp} ← {path}");
         }
 
         // ── Path helpers ──────────────────────────────────────────────────────
@@ -625,7 +809,6 @@ namespace WayExperience.Editor
             string matPath = AssetDatabase.GetAssetPath(mat);
             string matDir  = Path.GetDirectoryName(matPath)?.Replace('\\', '/') ?? "";
 
-            // Common: sibling "textures" folder (handles /materials → /textures)
             string[] candidates =
             {
                 matDir.Replace("/materials", "/textures"),
@@ -645,7 +828,6 @@ namespace WayExperience.Editor
                 if (AssetDatabase.IsValidFolder(rel)) return rel;
             }
 
-            // Fallback: folder of any texture already on the material
             int count = ShaderUtil.GetPropertyCount(mat.shader);
             for (int i = 0; i < count; i++)
             {
