@@ -4,6 +4,11 @@ All notable changes to this package will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-09-07
+
+### Fixed
+- Output textures are now saved to the same folder as their source textures (e.g. `_BaseMap.png` lands next to `_Diffuse.jpg`). When multiple sources for one output come from different folders, the first contributing source wins. Auto-assign now uses the exact output paths from the remap step instead of searching by folder, which also fixes assignment after source textures are deleted.
+
 ## [1.2.0] - 2026-09-01
 
 ### Added

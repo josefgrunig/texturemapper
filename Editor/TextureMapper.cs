@@ -488,10 +488,14 @@ namespace WayExperience.Editor
         {
             Debug.Log($"[TextureMapper] ══ Starting remap for {materials.Count} material(s) ══");
 
-            var toDelete = new List<string>();
+            var toDelete   = new List<string>();
+            var outputMaps = new Dictionary<Material, Dictionary<OutputTexture, string>>();
 
             foreach (var mat in materials)
-                ProcessMaterial(mat, toDelete);
+            {
+                var paths = ProcessMaterial(mat, toDelete);
+                if (paths != null) outputMaps[mat] = paths;
+            }
 
             if (_config.deleteSourceTextures)
                 foreach (var p in toDelete)
@@ -505,7 +509,10 @@ namespace WayExperience.Editor
             if (_config.shaderAssign.enabled && _config.shaderAssign.textureMappings.Count > 0)
             {
                 foreach (var mat in materials)
-                    AutoAssignTextures(mat);
+                {
+                    outputMaps.TryGetValue(mat, out var paths);
+                    AutoAssignTextures(mat, paths);
+                }
                 AssetDatabase.SaveAssets();
             }
 
@@ -513,20 +520,21 @@ namespace WayExperience.Editor
             EditorUtility.DisplayDialog("Texture Mapper", "Remap complete. Check Console for details.", "OK");
         }
 
-        void ProcessMaterial(Material mat, List<string> toDelete)
+        // Returns asset paths of saved output textures keyed by OutputTexture type, or null on failure.
+        Dictionary<OutputTexture, string> ProcessMaterial(Material mat, List<string> toDelete)
         {
             string matPath = AssetDatabase.GetAssetPath(mat);
             if (string.IsNullOrEmpty(matPath))
             {
                 Debug.LogError($"[TextureMapper] [{mat.name}] Cannot find asset path — skipping.");
-                return;
+                return null;
             }
 
             string texFolder = FindTextureFolderForMaterial(mat);
             if (string.IsNullOrEmpty(texFolder))
             {
                 Debug.LogError($"[TextureMapper] [{mat.name}] Cannot locate texture folder — skipping.");
-                return;
+                return null;
             }
 
             string prefix = mat.name;
@@ -553,7 +561,7 @@ namespace WayExperience.Editor
             if (matched.Count == 0)
             {
                 Debug.LogWarning($"[TextureMapper] [{mat.name}] No source textures found — skipping.");
-                return;
+                return null;
             }
 
             int outW = 4, outH = 4;
@@ -572,7 +580,9 @@ namespace WayExperience.Editor
                 [OutputTexture.MAHS]    = Fill(outW * outH, new Color(0f,   1f,   0f,   1f)),
                 [OutputTexture.Normal]  = Fill(outW * outH, new Color(0.5f, 0.5f, 1f,   1f)),
             };
-            var written = new HashSet<OutputTexture>();
+            var written       = new HashSet<OutputTexture>();
+            // First source folder that writes to each output type — used as that output's save location.
+            var outputFolders = new Dictionary<OutputTexture, string>();
 
             foreach (var (cfg, srcPath) in matched)
             {
@@ -590,25 +600,33 @@ namespace WayExperience.Editor
                     BlitChannel(srcPx, dstPx, ch.source, ch.target);
 
                 written.Add(cfg.outputTexture);
+                if (!outputFolders.ContainsKey(cfg.outputTexture))
+                    outputFolders[cfg.outputTexture] = Path.GetDirectoryName(srcPath)?.Replace('\\', '/') ?? texFolder;
+
                 Debug.Log($"[TextureMapper] [{mat.name}]  {Path.GetFileName(srcPath)} [{cfg.suffix}] → " +
                           $"{cfg.outputTexture}  " +
                           $"({string.Join(", ", activeMappings.Select(c => $"{c.source}→{c.target}"))})");
             }
 
+            var outputPaths    = new Dictionary<OutputTexture, string>();
             var outputBaseNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var outType in written)
             {
-                string outSuffix = outType == OutputTexture.BaseMap ? "_BaseMap"
-                                 : outType == OutputTexture.MAHS    ? "_MAHS"
-                                 :                                    "_Normal";
+                string outSuffix  = outType == OutputTexture.BaseMap ? "_BaseMap"
+                                  : outType == OutputTexture.MAHS    ? "_MAHS"
+                                  :                                    "_Normal";
+                string saveFolder = outputFolders.TryGetValue(outType, out var f) ? f : texFolder;
 
-                string saved = SavePng(buffers[outType], outW, outH, texFolder,
+                string saved = SavePng(buffers[outType], outW, outH, saveFolder,
                     _config.outputPrefix + prefix + outSuffix,
                     isNormal: outType == OutputTexture.Normal,
                     isSRGB:   outType == OutputTexture.BaseMap);
 
                 if (saved != null)
+                {
+                    outputPaths[outType] = saved;
                     outputBaseNames.Add(Path.GetFileNameWithoutExtension(saved));
+                }
             }
 
             if (_config.deleteSourceTextures)
@@ -618,6 +636,8 @@ namespace WayExperience.Editor
                     if (!outputBaseNames.Contains(srcBase))
                         toDelete.Add(srcPath);
                 }
+
+            return outputPaths;
         }
 
         // ── Pixel helpers ─────────────────────────────────────────────────────
@@ -755,15 +775,8 @@ namespace WayExperience.Editor
 
         // ── Auto-assign ───────────────────────────────────────────────────────
 
-        void AutoAssignTextures(Material mat)
+        void AutoAssignTextures(Material mat, Dictionary<OutputTexture, string> outputPaths)
         {
-            string folder = FindTextureFolderForMaterial(mat);
-            if (folder == null)
-            {
-                Debug.LogWarning($"[TextureMapper] [{mat.name}] Cannot locate texture folder for auto-assign.");
-                return;
-            }
-
             // Assign shader first so property names are valid before setting textures
             if (!string.IsNullOrEmpty(_config.shaderAssign.shaderName))
             {
@@ -779,18 +792,17 @@ namespace WayExperience.Editor
                 }
             }
 
-            string prefix = _config.outputPrefix + mat.name;
+            if (outputPaths == null || outputPaths.Count == 0)
+            {
+                Debug.LogWarning($"[TextureMapper] [{mat.name}] No output textures to assign.");
+                EditorUtility.SetDirty(mat);
+                return;
+            }
 
             foreach (var m in _config.shaderAssign.textureMappings)
             {
                 if (string.IsNullOrEmpty(m.shaderProperty)) continue;
-
-                string texSuffix = m.outputTexture == OutputTexture.BaseMap ? "_BaseMap"
-                                 : m.outputTexture == OutputTexture.MAHS    ? "_MAHS"
-                                 :                                             "_Normal";
-
-                string path = FindTexturePath(folder, prefix + texSuffix);
-                if (path == null) continue;
+                if (!outputPaths.TryGetValue(m.outputTexture, out var path)) continue;
 
                 var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
                 if (tex == null) continue;
@@ -841,14 +853,5 @@ namespace WayExperience.Editor
             return null;
         }
 
-        string FindTexturePath(string folder, string nameNoExt)
-        {
-            foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".tga", ".tif", ".psd" })
-            {
-                string p = $"{folder}/{nameNoExt}{ext}";
-                if (AssetDatabase.LoadAssetAtPath<Texture2D>(p) != null) return p;
-            }
-            return null;
-        }
     }
 }
