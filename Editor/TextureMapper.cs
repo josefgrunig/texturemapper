@@ -260,18 +260,50 @@ namespace WayExperience.Editor
 
             EditorGUILayout.Space(6);
 
-            // Remap button
+            // Gather materials from Project selection and from scene MeshRenderers
             var selMats = Selection.objects.OfType<Material>().ToList();
-            string hint = selMats.Count == 0
-                ? "Select materials in the Project window to remap."
-                : $"{selMats.Count} material(s) selected.";
-            EditorGUILayout.HelpBox(hint, selMats.Count == 0 ? MessageType.Info : MessageType.None);
 
-            GUI.enabled = selMats.Count > 0;
+            var selRenderers = Selection.gameObjects
+                .Select(go => go.GetComponent<MeshRenderer>())
+                .Where(r => r != null)
+                .ToList();
+
+            var rendererMats = selRenderers
+                .SelectMany(r => r.sharedMaterials)
+                .Where(m => m != null)
+                .Distinct()
+                .Except(selMats)
+                .ToList();
+
+            var allMats = selMats.Concat(rendererMats).ToList();
+
+            string buttonLabel;
+            string hint;
+            bool hasMeshRenderers = selRenderers.Count > 0;
+
+            if (allMats.Count == 0)
+            {
+                hint        = "Select materials in the Project window or MeshRenderers in the scene.";
+                buttonLabel = "Remap Selected Materials";
+            }
+            else if (hasMeshRenderers)
+            {
+                buttonLabel = "Remap Selected MeshRenderers' Materials";
+                hint        = $"{allMats.Count} material(s) on {selRenderers.Count} MeshRenderer(s)";
+            }
+            else
+            {
+                buttonLabel = "Remap Selected Materials";
+                hint        = $"{selMats.Count} material(s) selected.";
+            }
+
+            EditorGUILayout.HelpBox(hint, allMats.Count == 0 ? MessageType.Info : MessageType.None);
+
+            GUI.enabled = allMats.Count > 0;
             var prevBg = GUI.backgroundColor;
             GUI.backgroundColor = new Color(0.35f, 0.75f, 0.35f);
-            if (GUILayout.Button("Remap Selected Materials", GUILayout.Height(36)))
-                RemapSelectedMaterials(selMats);
+            if (GUILayout.Button(buttonLabel, GUILayout.Height(36)))
+                RemapSelectedMaterials(allMats);
             GUI.backgroundColor = prevBg;
             GUI.enabled = true;
 
@@ -559,10 +591,7 @@ namespace WayExperience.Editor
             }
 
             if (matched.Count == 0)
-            {
-                Debug.LogWarning($"[TextureMapper] [{mat.name}] No source textures found — skipping.");
-                return null;
-            }
+                Debug.Log($"[TextureMapper] [{mat.name}] No source textures to remap — will look for existing outputs.");
 
             int outW = 4, outH = 4;
             foreach (var (_, path) in matched)
@@ -636,6 +665,25 @@ namespace WayExperience.Editor
                     if (!outputBaseNames.Contains(srcBase))
                         toDelete.Add(srcPath);
                 }
+
+            // Fill in any output types that weren't generated this run but already exist on disk.
+            foreach (OutputTexture outType in Enum.GetValues(typeof(OutputTexture)))
+            {
+                if (outputPaths.ContainsKey(outType)) continue;
+
+                string outSuffix = outType == OutputTexture.BaseMap ? "_BaseMap"
+                                 : outType == OutputTexture.MAHS    ? "_MAHS"
+                                 :                                    "_Normal";
+
+                // Check prefixed name first, then bare material name.
+                string found = FindExistingOutputTexture(texFolder, _config.outputPrefix + prefix + outSuffix)
+                            ?? FindExistingOutputTexture(texFolder, prefix + outSuffix);
+                if (found != null)
+                {
+                    outputPaths[outType] = found;
+                    Debug.Log($"[TextureMapper] [{mat.name}] Found existing {outType}: {found}");
+                }
+            }
 
             return outputPaths;
         }
@@ -771,6 +819,44 @@ namespace WayExperience.Editor
                     Color.Lerp(src[y1 * sw + x0], src[y1 * sw + x1], tx), ty);
             }
             return dst;
+        }
+
+        string FindExistingOutputTexture(string preferredFolder, string nameNoExt)
+        {
+            // 1. Exact path in the expected folder.
+            if (!string.IsNullOrEmpty(preferredFolder))
+            {
+                foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".tga", ".tif", ".psd" })
+                {
+                    string p = $"{preferredFolder}/{nameNoExt}{ext}";
+                    if (AssetDatabase.LoadAssetAtPath<Texture2D>(p) != null) return p;
+                }
+            }
+
+            // 2. Recursive search within the parent folder (covers sibling sub-folders like textures/, materials/).
+            string parentFolder = string.IsNullOrEmpty(preferredFolder)
+                ? null
+                : Path.GetDirectoryName(preferredFolder)?.Replace('\\', '/');
+
+            if (!string.IsNullOrEmpty(parentFolder) && AssetDatabase.IsValidFolder(parentFolder))
+            {
+                foreach (var guid in AssetDatabase.FindAssets($"t:Texture2D {nameNoExt}", new[] { parentFolder }))
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(guid);
+                    if (string.Equals(Path.GetFileNameWithoutExtension(path), nameNoExt, StringComparison.OrdinalIgnoreCase))
+                        return path;
+                }
+            }
+
+            // 3. Project-wide search as last resort.
+            foreach (var guid in AssetDatabase.FindAssets($"t:Texture2D {nameNoExt}"))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.Equals(Path.GetFileNameWithoutExtension(path), nameNoExt, StringComparison.OrdinalIgnoreCase))
+                    return path;
+            }
+
+            return null;
         }
 
         // ── Auto-assign ───────────────────────────────────────────────────────

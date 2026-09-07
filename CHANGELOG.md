@@ -4,6 +4,11 @@ All notable changes to this package will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-09-07
+
+### Added
+- Remap button now works on scene MeshRenderers: when GameObjects with a MeshRenderer are selected, the button reads "Remap Selected MeshRenderers' Materials" and processes all materials used by those renderers. Hint shows "x material(s) on y MeshRenderer(s)". Mixed selections (project materials + scene objects) are supported; shared materials are deduplicated.
+
 ## [1.2.1] - 2026-09-07
 
 ### Fixed
