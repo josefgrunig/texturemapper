@@ -4,6 +4,11 @@ All notable changes to this package will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-09-07
+
+### Changed
+- Scene object selection now uses the base `Renderer` component instead of `MeshRenderer`, so SkinnedMeshRenderer, ParticleSystemRenderer, LineRenderer, and any other Renderer subclass are supported automatically. Button and hint updated to say "Renderer(s)".
+
 ## [1.2.2] - 2026-09-07
 
 ### Added

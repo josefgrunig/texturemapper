@@ -264,7 +264,7 @@ namespace WayExperience.Editor
             var selMats = Selection.objects.OfType<Material>().ToList();
 
             var selRenderers = Selection.gameObjects
-                .Select(go => go.GetComponent<MeshRenderer>())
+                .Select(go => go.GetComponent<Renderer>())
                 .Where(r => r != null)
                 .ToList();
 
@@ -279,17 +279,17 @@ namespace WayExperience.Editor
 
             string buttonLabel;
             string hint;
-            bool hasMeshRenderers = selRenderers.Count > 0;
+            bool hasRenderers = selRenderers.Count > 0;
 
             if (allMats.Count == 0)
             {
-                hint        = "Select materials in the Project window or MeshRenderers in the scene.";
+                hint        = "Select materials in the Project window or Renderers in the scene.";
                 buttonLabel = "Remap Selected Materials";
             }
-            else if (hasMeshRenderers)
+            else if (hasRenderers)
             {
-                buttonLabel = "Remap Selected MeshRenderers' Materials";
-                hint        = $"{allMats.Count} material(s) on {selRenderers.Count} MeshRenderer(s)";
+                buttonLabel = "Remap Selected Renderers' Materials";
+                hint        = $"{allMats.Count} material(s) on {selRenderers.Count} Renderer(s)";
             }
             else
             {
